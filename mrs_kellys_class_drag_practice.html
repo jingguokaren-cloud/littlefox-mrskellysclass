@@ -1505,8 +1505,8 @@
 
         // 使用有道词典API发音
         function speakWord(word) {
-            // 清理单词中可能的标点
-            const cleanWord = word.replace(/[^a-zA-Z']/g, '');
+            // 清理单词中可能的标点（将弯引号转为直引号，并保留连字符）
+            const cleanWord = word.replace(/’/g, "'").replace(/[^a-zA-Z'\-]/g, '');
             if (!cleanWord) return;
 
             // 停止之前的音频
@@ -1528,7 +1528,7 @@
 
         // 发音按钮点击
         function speakPhrase(text) {
-            const cleanText = text.trim();
+            const cleanText = text.trim().replace(/’/g, "'");
             if (!cleanText) return;
 
             // 停止之前的音频
@@ -1544,66 +1544,22 @@
                 window.speechSynthesis.cancel();
             }
 
-            // 多个TTS源，按优先级尝试
-            const ttsUrls = [
-                `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=1`,
-                `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=2`,
-            ];
-
-            let currentTtsIndex = 0;
-            let resolved = false;
-
-            function tryNextTTS() {
-                if (resolved) return;
-
-                // 所有URL都试完了，使用浏览器内置 speechSynthesis 作为最终兜底
-                if (currentTtsIndex >= ttsUrls.length) {
-                    resolved = true;
-                    speakWithBrowserTTS(cleanText);
-                    return;
-                }
-
-                const url = ttsUrls[currentTtsIndex];
-                currentTtsIndex++;
-
-                const audio = new Audio();
-                window.currentAudio = audio;
-
-                // 超时计时器
-                const timeout = setTimeout(() => {
-                    if (!resolved) {
-                        audio.pause();
-                        audio.src = '';
-                        tryNextTTS();
-                    }
-                }, 3000);
-
-                audio.onloadeddata = () => {
-                    // 检查音频是否有实际内容（有些API返回空音频）
-                    if (audio.duration > 0.1) {
-                        clearTimeout(timeout);
-                        resolved = true;
-                        audio.play().catch(() => {
-                            resolved = false;
-                            tryNextTTS();
-                        });
-                    } else {
-                        clearTimeout(timeout);
-                        audio.pause();
-                        tryNextTTS();
-                    }
-                };
-
-                audio.onerror = () => {
-                    clearTimeout(timeout);
-                    tryNextTTS();
-                };
-
-                audio.src = url;
-                audio.load();
+            // 如果句子过长（有道API大概超过40-50个字符会报错），直接使用浏览器内置发音
+            // 防止有道报错后走兜底逻辑时，因离开点击事件上下文导致浏览器静默拦截发音
+            if (cleanText.length > 40) {
+                speakWithBrowserTTS(cleanText);
+                return;
             }
 
-            tryNextTTS();
+            // 直接触发播放，兼容 iOS Safari（不能使用 onloadeddata 等异步回调）
+            const url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=1`;
+            const audio = new Audio(url);
+            window.currentAudio = audio;
+
+            audio.play().catch(err => {
+                console.error("Audio play failed on Youdao API, fallback to TTS:", err);
+                speakWithBrowserTTS(cleanText);
+            });
         }
 
         // 使用浏览器内置 Web Speech API 作为最终备选
